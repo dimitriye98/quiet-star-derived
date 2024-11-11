@@ -78,6 +78,8 @@ def parse_arguments():
 
 # Clean the specific package files from the build directory
 def clean_package_files():
+    if not os.path.exists(BUILD_DIR):
+        return
     package_prefix = f"{PACKAGE_NAME}-{PACKAGE_VERSION}"
     for item in os.listdir(BUILD_DIR):
         item_path = os.path.join(BUILD_DIR, item)
