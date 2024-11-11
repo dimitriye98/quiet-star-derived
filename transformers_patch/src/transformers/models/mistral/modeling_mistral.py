@@ -1221,7 +1221,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         self.trice_mode = True
         self.remove_negative_rewards = True
         self.use_policy_loss_for_end_thought = True
-        
+
         self.base_original_mode = False
         self.original_mode = False
 
@@ -1250,7 +1250,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         self.subtract_mean_reward = False
         self.comparison_mode = False
         self.gumbel_detach = True
-    
+
         # For visualization
         self.eval_mode = False
 
@@ -1327,7 +1327,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
         # Generate the continuation
         continuation_length = self.n_ahead - 2
         new_key_values = past_key_values
-        
+
         start_time = time.time()
         for continuation_idx in range(continuation_length):
             outputs = self.model(
@@ -1477,7 +1477,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                 head_weight = head.weight
             head_weight = head_weight.to(states.device)
             return (head_weight @ states.transpose(-1, -2)).transpose(-1, -2).contiguous()
-    
+
         def idx_if_sequential(head, idx=0):
             if isinstance(head, nn.Sequential) or isinstance(head, nn.ModuleList):
                 return idx_if_sequential(head[idx], idx=idx)
@@ -1528,7 +1528,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                 self.end_embedding.data[1] = torch.log(self.model.embed_tokens.weight.data.std(dim=0) * self.thought_init_std_scale / self.embedding_scale)
 
         if not self.rm_initialized and (self.n_ahead > 1 or not self.base_original_mode):
-            self.rm_initialized = True                        
+            self.rm_initialized = True
             if not self.use_shallow_talk:
                 head = self.talk_head[0]
                 cur_head = head[-1] if isinstance(head, nn.Sequential) else head
@@ -1637,7 +1637,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                 else:
                     with torch.set_grad_enabled(not self.train_only_thinking_embedding):
                         inputs_embeds = self.model.embed_tokens(input_ids)
-            
+
             if self.n_ahead != 1 or self.n_ahead_talk != 1 or self.comparison_mode:
                 if attention_mask is None:
                     base_attention_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=0).to(input_ids.device)
@@ -1652,7 +1652,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                             [torch.ones((attention_mask.shape[0], past_key_values_length), dtype=attention_mask.dtype, device=attention_mask.device), attention_mask],
                             dim=-1
                         )
-                    # # if the attention mask 
+                    # # if the attention mask
                     attention_mask = _prepare_4d_causal_attention_mask(
                         attention_mask,
                         (batch_size, seq_len),
@@ -1712,7 +1712,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
 
                     residual_logits = self.talk_head[0](head_input_hidden_states)
                     if self.use_shallow_talk:
-                        residual_logits = apply_head(self.lm_head, residual_logits, detach=self.optimize_lm_head_only_at_start)                        
+                        residual_logits = apply_head(self.lm_head, residual_logits, detach=self.optimize_lm_head_only_at_start)
                     residual_logits = residual_logits.to(logits.device)
                     if self.use_weighted_talk_head:
                         # combine the cur_base_hidden with the talk_hidden_states according to the weighted head
@@ -1793,14 +1793,14 @@ class MistralForCausalLM(MistralPreTrainedModel):
                         if not self.comparison_mode and not (self.optimize_lm_head_only_at_start and (self.n_ahead + self.n_ahead_talk > 2)) or self.original_mode:
                             loss_list.append(loss)
                         talk_loss_list.append(nonzero_mean(loss).detach())
-            
+
             if not attempted or self.comparison_mode:
                 rm_hidden_states = hidden_states
                 # print("Magnitude of RM hidden states before RM head", rm_hidden_states.norm())
                 rm_logits = apply_head(self.lm_head, rm_hidden_states, detach=self.optimize_lm_head_only_at_start)
-                    
+
                 # don't allow it to predict the thinking token
-                if self.tokenizer_has_start_thought_token:                    
+                if self.tokenizer_has_start_thought_token:
                     rm_logits[..., self.start_token_id] = -1e10
                 if self.tokenizer_has_end_thought_token:
                     rm_logits[..., self.end_token_id] = -1e10
@@ -1966,7 +1966,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                                 cur_policy_shift_logits, cur_policy_shift_labels.to(cur_policy_shift_logits.device)
                             ).reshape(logits.shape[0], -1)
                             original_dqn_reward = cur_policy_reward_base_loss.detach() - unreduced_loss
-                                
+
                         if not did_skip_sampling:
                             nonzero_indices = prev_probabilities_2d.nonzero()
                             action_loglikelihoods = F.log_softmax(prev_sample_probs / self.reinforce_temperature, dim=-1)[nonzero_indices[:, 0], nonzero_indices[:, 1]]
@@ -1980,7 +1980,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                             else:
                                 added_reward = original_dqn_reward
                             policy_reward += added_reward
-                    
+
                     if self.use_policy_loss and ahead_idx == self.n_ahead + self.n_ahead_talk - 2:
                         # only compute during the thinking phase
                         if self.use_reparam_for_thought_embeddings and (self.use_start_thought_token or self.use_end_thought_token):
@@ -1999,7 +1999,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                             if self.use_end_thought_token and self.use_policy_loss_for_end_thought:
                                 action_loglikelihoods_list.append(end_loglikelihood)
                             if self.use_start_thought_token:
-                                action_loglikelihoods_list.append(start_loglikelihood)                                
+                                action_loglikelihoods_list.append(start_loglikelihood)
 
                         if ahead_idx == self.n_ahead + self.n_ahead_talk - 2 and self.eval_mode:
                             with torch.no_grad():
@@ -2062,7 +2062,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                                 # average over the passes
                                 train_policy_reward = batched_policy_reward - batched_policy_reward.mean(dim=1, keepdim=True)
                                 train_policy_reward = train_policy_reward.reshape(-1, train_policy_reward.shape[-1])
-                                
+
                             if self.subtract_mean_reward:
                                 train_policy_reward = train_policy_reward - train_policy_reward.mean()
                             if self.remove_negative_rewards:
@@ -2090,7 +2090,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
             elif self.final_only_mode:
                 loss = sum(
                     self.loss_mean(loss_list[-i]) for i in range(1, self.n_ahead_talk + 1)
-                ) / self.n_ahead_talk   
+                ) / self.n_ahead_talk
             else:
                 loss = None
                 for i in range(len(loss_list)):
@@ -2100,7 +2100,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                     else:
                         loss = cur_loss
                 loss = loss / len(loss_list)
-            
+
             loss = loss * self.base_loss_beta
 
         if dqn_loss_list:
@@ -2114,17 +2114,17 @@ class MistralForCausalLM(MistralPreTrainedModel):
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
-    
+
         base_log_dict = {
             f"loss_{i}": nonzero_mean(loss_list[i]) for i in range(len(loss_list))
         }
 
         if loss is not None:
             base_log_dict["loss_train"] = loss.item()
-        
+
         for loss_key, loss_val in base_log_dict.items():
             log_dict[loss_key] += loss_val / self.n_tokens_print
-                
+
         if self.use_policy_loss and policy_reward is not None:
             log_dict["policy_loss"] += dqn_loss / self.n_tokens_print
             log_dict["policy_reward"] += policy_reward.mean() / self.n_tokens_print
@@ -2156,7 +2156,7 @@ class MistralForCausalLM(MistralPreTrainedModel):
                         for key in list(log_dict.keys()):
                             new_log_dict["eval_" + key] = log_dict[key]
                         log_dict = new_log_dict
-                    log_dict["training_steps"] = self.training_steps 
+                    log_dict["training_steps"] = self.training_steps
                     log_dict["batch_size"] = batch_size
                     log_dict["example_steps"] = self.training_steps * batch_size * self.gradient_accumulation_steps
                     if self.n_ahead > 1:
