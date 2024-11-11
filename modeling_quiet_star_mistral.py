@@ -43,8 +43,8 @@ from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from transformers import Cache, DynamicCache
-from transformers import _prepare_4d_causal_attention_mask
-from transformers import CausalLMOutputWithPast
+from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
+from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers import MistralPreTrainedModel, MistralModel
 from transformers import (
     add_start_docstrings_to_model_forward,
