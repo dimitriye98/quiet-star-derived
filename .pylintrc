@@ -5,4 +5,4 @@ indent-string='\t'
 max-args=99
 
 [MESSAGES CONTROL]
-disable=missing-class-docstring,missing-module-docstring,missing-function-docstring,typecheck,line-too-long,too-many-locals,too-many-arguments,too-many-statements,too-many-lines,too-many-instance-attributes,unnecessary-lambda-assignment,invalid-name
+disable=missing-class-docstring,missing-module-docstring,missing-function-docstring,typecheck,line-too-long,too-many-locals,too-many-arguments,too-many-positional-arguments,too-many-statements,too-many-lines,too-many-instance-attributes,unnecessary-lambda-assignment,invalid-name,fixme,consider-merging-isinstance,too-many-branches,too-many-nested-blocks,too-many-ancestors
