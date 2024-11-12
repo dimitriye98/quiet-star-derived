@@ -1,5 +1,5 @@
-import torch
 import random
+import torch
 from transformers import AutoTokenizer
 
 initial_tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
@@ -19,7 +19,7 @@ def preprocess_function(examples):
 	tokenized["labels"] = tokenized["input_ids"].clone()
 	return tokenized
 
-def preprocess_eval_function_gsm(examples, use_few_shot=False, max_length=256):
+def preprocess_eval_function_gsm(examples,  max_length=256):
 	to_answer = lambda q, a: "Q: " + q + eval_answer_marker + a.split("####")[-1] + "\n"
 	all_prompts = [to_answer(q, a) for q, a in zip(examples['question'], examples['answer'])]
 	all_tokenized = [initial_tokenizer.encode(p, return_tensors="pt") for p in all_prompts]

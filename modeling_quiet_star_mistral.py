@@ -18,29 +18,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ PyTorch Mistral model."""
-import inspect
 import math
-import copy
-import os
-import time
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-import wandb
-from termcolor import colored
-from tqdm import tqdm
-import random
-import numpy as np
-from matplotlib.colors import LinearSegmentedColormap, LogNorm
-import warnings
 from collections import defaultdict
 from typing import List, Optional, Tuple, Union
 
+import seaborn as sns
+import matplotlib.pyplot as plt
+import wandb
+import numpy as np
+from matplotlib.colors import  LogNorm
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss
 
 from transformers import Cache, DynamicCache
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
@@ -52,13 +43,13 @@ from transformers.utils import (
 	replace_return_docstrings,
 )
 
-logger = logging.get_logger(__name__)
-
-_CONFIG_FOR_DOC = "QuietStarMistralConfig"
-
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.colors import HexColor
+
+logger = logging.get_logger(__name__)
+
+_CONFIG_FOR_DOC = "QuietStarMistralConfig"
 
 def save_tokens_with_rewards_to_pdf(input_ids, token_rewards, tokenizer, output_file="text.pdf", eps=0.2, eps2=0.5):
 	c = canvas.Canvas(output_file, pagesize=letter)
@@ -295,7 +286,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 		# For visualization
 		self.eval_mode = False
 
-		num_talk = 1
 		talk_input_dim = config.hidden_size if not self.use_concat_talk_head else config.hidden_size * 2
 		if self.use_weighted_talk_head:
 			talk_output_dim = 1
@@ -369,7 +359,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 		continuation_length = self.n_ahead - 2
 		new_key_values = past_key_values
 
-		start_time = time.time()
 		for continuation_idx in range(continuation_length):
 			outputs = self.model(
 				input_ids=input_ids if continuation_idx == 0 else next_token_id.unsqueeze(-1).to(input_ids.device),
@@ -537,15 +526,14 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			labels = none_repeat_interleave(labels, self.n_passes)
 			if past_key_values is not None:
 				past_key_values = [none_repeat_interleave(p, self.n_passes) for p in past_key_values]
-		cur_token_indices = torch.arange(input_ids.shape[1], device=input_ids.device)
 
-		self.tokenizer_has_start_thought_token = True
-		self.tokenizer_has_end_thought_token = True
+		tokenizer_has_start_thought_token = True
+		tokenizer_has_end_thought_token = True
 		if self.start_token_id is None:
 			self.start_token_id = self.tokenizer.convert_tokens_to_ids("<|startthought|>")
 			if self.start_token_id == 0:
 				self.start_token_id = self.tokenizer.bos_token_id
-				self.tokenizer_has_start_thought_token = False
+				tokenizer_has_start_thought_token = False
 			elif self.use_start_thought_token:
 				# base_start_id = self.tokenizer.convert_tokens_to_ids(self.initial_start_token)
 				base_start_id = self.tokenizer.encode(self.initial_start_token, add_special_tokens=False)[0]
@@ -558,7 +546,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			self.end_token_id = self.tokenizer.convert_tokens_to_ids("<|endthought|>")
 			if self.end_token_id == 0:
 				self.end_token_id = self.tokenizer.eos_token_id
-				self.tokenizer_has_end_thought_token = False
+				tokenizer_has_end_thought_token = False
 			elif self.use_end_thought_token:
 				# base_end_id = self.tokenizer.convert_tokens_to_ids(self.initial_end_token)
 				base_end_id = self.tokenizer.encode(self.initial_end_token, add_special_tokens=False)[0]
@@ -606,29 +594,25 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 					self.talk_head[-1].weight.data = lambda_transform(self.talk_head[0])
 
 		loss = None
-		prev_rm_tokens = None
-		cur_rm_tokens = None
-		prev_rm_logits = None
 		prev_sample_probs = None
 		did_skip_sampling = None
 		skip_sampling = None
 		sample_probs = None
 		hidden_states = None
 		logits = None
-		talk_kl_penalty = None
 		rm_logits = None
 		residual_logits = None
 		probabilities_2d = None
 		prev_probabilities_2d = None
 		policy_reward = None
-		logits_to_output = None
 		batch_size, seq_len = input_ids.shape
-		base_input_ids = input_ids.clone()
 		loss_list = []
 		dqn_loss_list = []
 		sampled_token_history = []
-		sample_probs_history = []
 		action_loglikelihoods_list = []
+
+		start_embedding = None
+		end_embedding = None
 
 		if self.use_end_thought_token or self.use_start_thought_token:
 			if not self.use_reparam_for_thought_embeddings:
@@ -660,11 +644,10 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 				position_ids = position_ids.view(-1, seq_len).long()
 
 			if inputs_embeds is None:
-				contains_start = self.use_start_thought_token and (input_ids == self.start_token_id).any()
-				contains_end = self.use_end_thought_token and (input_ids == self.end_token_id).any()
+				contains_start = self.use_start_thought_token and (input_ids == self.start_token_id).any() and start_embedding is not None
+				contains_end = self.use_end_thought_token and (input_ids == self.end_token_id).any() and end_embedding is not None
 				contains_thought = contains_start or contains_end
 				if contains_thought:
-					thought_id = self.start_token_id if contains_start else self.end_token_id
 					cur_thought_embedding = start_embedding if contains_start else end_embedding
 					if self.use_reparam_for_thought_embeddings:
 						inputs_embeds = torch.randn(batch_size, seq_len, self.model.config.hidden_size, device=input_ids.device, dtype=cur_thought_embedding.dtype)
@@ -685,10 +668,10 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 					base_attention_mask = base_attention_mask.view(1, 1, seq_len, seq_len)
 					base_attention_mask = base_attention_mask.repeat(input_ids.shape[0], 1, 1, 1)
 					attention_mask = base_attention_mask
-					breakpoint()
+					# breakpoint()
 				elif attention_mask.dim() == 2:
 					if seq_len + past_key_values_length != attention_mask.shape[-1]:
-						breakpoint()
+						# breakpoint()
 						attention_mask = torch.cat(
 							[torch.ones((attention_mask.shape[0], past_key_values_length), dtype=attention_mask.dtype, device=attention_mask.device), attention_mask],
 							dim=-1
@@ -714,10 +697,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 				return_dict=return_dict,
 			)
 
-			prev_hidden_states = hidden_states
 			hidden_states = outputs[0]
-			prev_rm_logits = rm_logits  # for policy gradient
-			prev_rm_tokens = cur_rm_tokens  # for policy gradient
 
 			if ahead_idx == 0:
 				hidden_states_lm = hidden_states
@@ -841,9 +821,9 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 				rm_logits = apply_head(self.lm_head, rm_hidden_states, detach=self.optimize_lm_head_only_at_start)
 
 				# don't allow it to predict the thinking token
-				if self.tokenizer_has_start_thought_token:
+				if tokenizer_has_start_thought_token:
 					rm_logits[..., self.start_token_id] = torch.finfo(rm_logits.dtype).min
-				if self.tokenizer_has_end_thought_token:
+				if tokenizer_has_end_thought_token:
 					rm_logits[..., self.end_token_id] = torch.finfo(rm_logits.dtype).min
 				probabilities = rm_logits
 				if probabilities_2d is not None:
@@ -902,7 +882,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 					with torch.set_grad_enabled(not self.train_only_thinking_embedding):
 						inputs_embeds = probabilities_2d @ (self.model.embed_tokens.weight.to(probabilities.device).to(probabilities.dtype))
 				else:
-					thought_id = self.start_token_id if contains_start else self.end_token_id
 					cur_thought_embedding = start_embedding if contains_start else end_embedding
 					if self.use_reparam_for_thought_embeddings:
 						inputs_embeds = torch.randn(batch_size, seq_len, self.model.config.hidden_size, device=input_ids.device, dtype=cur_thought_embedding.dtype)
@@ -917,7 +896,9 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 				inputs_embeds = inputs_embeds.view(probabilities.size(0), probabilities.size(1), -1).to(self.model.embed_tokens.weight.dtype)
 
 				if len(attention_mask.shape) == 2:
-					breakpoint()
+					# breakpoint()
+					# TODO: fix this
+					pass
 				else:
 					original_attention = attention_mask[..., :attention_mask.shape[-2]]
 					if self.use_upper_triangular:
@@ -997,7 +978,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 							cur_policy_shift_logits = initial_loss_logits[..., shift_amount:-1, :].contiguous().detach()
 							cur_policy_shift_labels = labels[..., 1 + shift_amount:].contiguous()
 							# Flatten the tokens
-							cur_policy_loss_fct = CrossEntropyLoss(reduction="none")
 							cur_policy_shift_logits = cur_policy_shift_logits.view(-1, self.config.vocab_size)
 							cur_policy_shift_labels = cur_policy_shift_labels.view(-1).clone()
 							# Enable model parallelism
@@ -1030,10 +1010,13 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 							# with mean start_embedding[0] and standard deviation start_embedding[1]
 							if self.use_start_thought_token:
 								exp_start_std = torch.exp(start_embedding[1])
+								# FIXME: Spooky action at a distance
+								# pylint: disable=used-before-assignment
 								start_loglikelihood = -0.5 * (sampled_start.detach() - start_embedding[0]) ** 2 / exp_start_std ** 2 - start_embedding[1] - 0.5 * math.log(2 * math.pi)
 								start_loglikelihood = start_loglikelihood.mean(dim=-1)
 							if self.use_end_thought_token:
 								exp_end_std = torch.exp(end_embedding[1])
+								# pylint: disable=used-before-assignment
 								end_loglikelihood = -0.5 * (sampled_end.detach() - end_embedding[0]) ** 2 / exp_end_std ** 2 - end_embedding[1] - 0.5 * math.log(2 * math.pi)
 								end_loglikelihood = end_loglikelihood.mean(dim=-1)
 							# we use the mean instead of the sum to prevent dependence on the dimensionality of the embeddings
@@ -1079,8 +1062,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 									plt.close()
 
 									# Step 1: Create a base color palette
-									base_colors = sns.color_palette("light:#5A9", n_colors=256)  # More colors for a smoother gradient
-									base_cmap = LinearSegmentedColormap.from_list("log_light", base_colors)
 									log_norm = LogNorm(vmin=1e-3, vmax=10)
 
 									sns.kdeplot(x=data, y=losses, fill=True, levels=20, norm=log_norm, cut=0, linewidths=0)
@@ -1134,6 +1115,8 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 				) / self.n_ahead_talk
 			else:
 				loss = None
+				# FIXME
+				# pylint: disable=consider-using-enumerate
 				for i in range(len(loss_list)):
 					cur_loss = self.loss_mean(loss_list[i])
 					if loss is not None:
@@ -1179,6 +1162,8 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 
 		# also log relative losses to loss_0
 		if loss_list:
+			# FIXME
+			# pylint: disable=consider-using-enumerate
 			for i in range(len(loss_list)):
 				talk_idx = min(max(i - (self.n_ahead - 1), 0), len(talk_loss_list) - 1)
 				if not talk_loss_list:
@@ -1214,7 +1199,9 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 						self.log_dict = defaultdict(int)
 					else:
 						self.eval_log_dict = defaultdict(int)
-		except Exception as e:
+		# FIXME: broad exception
+		# pylint: disable=broad-except
+		except Exception as _:
 			pass
 
 		if not self.training:

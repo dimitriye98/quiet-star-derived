@@ -1,15 +1,16 @@
-import torch
-torch.backends.cuda.matmul.allow_tf32 = True
-import random
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from datasets import load_dataset
+#pylint: skip-file
 import os
+import random
 import time
 import re
-from tqdm import tqdm
-from collections import Counter
-
 import argparse
+from collections import Counter
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset
+from tqdm import tqdm
+
+torch.backends.cuda.matmul.allow_tf32 = True
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_idx", type=int, default=0)
 parser.add_argument("--baseline", action="store_true")

@@ -15,7 +15,6 @@
 """ Mistral model configuration"""
 
 from transformers import MistralConfig
-from transformers import PretrainedConfig
 from transformers import logging
 
 

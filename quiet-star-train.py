@@ -1,17 +1,14 @@
-import torch
-torch.backends.cuda.matmul.allow_tf32 = True
-import random
-from transformers import AutoTokenizer, AutoModelForCausalLM, TextGenerationPipeline, AutoConfig
-from accelerate import infer_auto_device_map, init_empty_weights, dispatch_model
-from datasets import load_dataset
-from torch.nn import CrossEntropyLoss
-from transformers import TrainingArguments, Trainer
+#pylint: skip-file
 import os
 import time
-import wandb
-from huggingface_custom_callback import EarlyStoppingCallback
-from eval_helpers import preprocess_eval_function_gsm, preprocess_eval_function_csqa, preprocess_function, compute_metrics, truncate_or_pad
+import random
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
+from datasets import load_dataset
+from eval_helpers import preprocess_eval_function_gsm, preprocess_eval_function_csqa, preprocess_function, compute_metrics
+
 random_seed = 42
+torch.backends.cuda.matmul.allow_tf32 = True
 torch.manual_seed(random_seed)
 random.seed(random_seed)
 
