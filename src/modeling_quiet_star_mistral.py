@@ -943,6 +943,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 					# if shift_labels.min() == self.tokenizer.pad_token_id:
 					shift_labels = torch.where(shift_labels == self.tokenizer.pad_token_id, -100, shift_labels)
 					unreduced_loss = loss_fct(shift_logits, shift_labels)
+					# pylint: disable=comparison-with-itself
 					if torch.any(unreduced_loss != unreduced_loss):
 						raise ValueError("NaN loss")
 					unreduced_loss = unreduced_loss.reshape(logits.shape[0], -1)
