@@ -45,6 +45,8 @@ jobs:
           context: .
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          containerfiles: |
+            ./Dockerfile
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
       - name: Push image
