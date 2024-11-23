@@ -3,7 +3,7 @@ steps:
     env:
       - DOCKER_BUILDKIT=1
     script: >
-      docker build --progress=rawjson
+      docker buildx build --progress=rawjson
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
       --cache-from us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
