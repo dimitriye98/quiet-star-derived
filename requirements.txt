@@ -63,4 +63,3 @@ xxhash==3.5.0
 yarl==1.17.1
 
 # Optional, comment out if on a system without CUDA
-#flash-attn==2.6.3
