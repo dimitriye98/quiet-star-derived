@@ -31,7 +31,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, Parameter
 
 from transformers import Cache, DynamicCache
 from transformers.modeling_attn_mask_utils import _prepare_4d_causal_attention_mask
@@ -527,34 +527,67 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			if past_key_values is not None:
 				past_key_values = [none_repeat_interleave(p, self.n_passes) for p in past_key_values]
 
-		tokenizer_has_start_thought_token = True
-		tokenizer_has_end_thought_token = True
-		if self.start_token_id is None:
-			self.start_token_id = self.tokenizer.convert_tokens_to_ids("<|startthought|>")
-			if self.start_token_id == 0:
-				self.start_token_id = self.tokenizer.bos_token_id
-				tokenizer_has_start_thought_token = False
-			elif self.use_start_thought_token:
-				# base_start_id = self.tokenizer.convert_tokens_to_ids(self.initial_start_token)
-				base_start_id = self.tokenizer.encode(self.initial_start_token, add_special_tokens=False)[0]
+		def initialize_thought_token(
+				token_id_attr: str,
+				token_str: str,
+				use_thought_token: bool,
+				initial_token: str,
+				embedding: Parameter,
+				fallback_token_id: int
+		):
+			"""
+			Initializes a thought token (start or end) by setting its token ID and embedding.
+
+			Args:
+				token_id_attr (str): The attribute name for the token ID (e.g., "start_token_id").
+				token_str (str): The token string to convert to ID (e.g., "<|startthought|>").
+				use_thought_token (bool): Flag indicating whether to use the thought token (e.g. `self.use_start_thought_token`).
+				initial_token (str): The initial token string for embedding initialization (e.g. `self.initial_start_token`).
+				embedding (): The embedding to use (e.g., `self.start_embedding`).
+				fallback_token_id (int): The fallback token ID (e.g., `self.tokenizer.bos_token_id`).
+
+			Returns:
+				bool: Indicates whether the tokenizer has the thought token.
+			"""
+			if getattr(self, token_id_attr) is not None:
+				return True
+
+			token_id = self.tokenizer.convert_tokens_to_ids(token_str)
+			if token_id == 0:
+				setattr(self, token_id_attr, fallback_token_id)
+				return False
+			setattr(self, token_id_attr, token_id)
+
+			if use_thought_token:
+				base_id = self.tokenizer.encode(initial_token, add_special_tokens=False)[0]
+
+				embed_weight = self.model.embed_tokens.weight.data
 				if self.initialize_thought_embedding_to_normal:
-					self.start_embedding.data = torch.zeros_like(self.start_embedding.data)
+					embedding.data = torch.zeros_like(embedding.data)
 				else:
-					self.start_embedding.data[0] = self.model.embed_tokens.weight.data[base_start_id].clone().detach() / self.embedding_scale
-				self.start_embedding.data[1] = torch.log(self.model.embed_tokens.weight.data.std(dim=0) * self.thought_init_std_scale / self.embedding_scale)
-		if self.end_token_id is None:
-			self.end_token_id = self.tokenizer.convert_tokens_to_ids("<|endthought|>")
-			if self.end_token_id == 0:
-				self.end_token_id = self.tokenizer.eos_token_id
-				tokenizer_has_end_thought_token = False
-			elif self.use_end_thought_token:
-				# base_end_id = self.tokenizer.convert_tokens_to_ids(self.initial_end_token)
-				base_end_id = self.tokenizer.encode(self.initial_end_token, add_special_tokens=False)[0]
-				if self.initialize_thought_embedding_to_normal:
-					self.end_embedding.data = torch.zeros_like(self.end_embedding.data)
-				else:
-					self.end_embedding.data[0] = self.model.embed_tokens.weight.data[base_end_id].clone().detach() / self.embedding_scale
-				self.end_embedding.data[1] = torch.log(self.model.embed_tokens.weight.data.std(dim=0) * self.thought_init_std_scale / self.embedding_scale)
+					embedding.data[0] = embed_weight[base_id].clone().detach() / self.embedding_scale
+				embedding.data[1] = torch.log(embed_weight.std(dim=0) * self.thought_init_std_scale / self.embedding_scale)
+
+			return True
+
+		# Initialize tokenizer thought token flags
+		tokenizer_has_start_thought_token = initialize_thought_token(
+			token_id_attr='start_token_id',
+			token_str="<|startthought|>",
+			use_thought_token=self.use_start_thought_token,
+			initial_token=self.initial_start_token,
+			embedding=self.start_embedding,
+			fallback_token_id=self.tokenizer.bos_token_id
+		)
+
+		tokenizer_has_end_thought_token = initialize_thought_token(
+			token_id_attr='end_token_id',
+			token_str="<|endthought|>",
+			use_thought_token=self.use_end_thought_token,
+			initial_token=self.initial_end_token,
+			embedding=self.end_embedding,
+			fallback_token_id=self.tokenizer.eos_token_id
+		)
 
 		if not self.rm_initialized and (self.n_ahead > 1 or not self.base_original_mode):
 			self.rm_initialized = True
