@@ -6,8 +6,9 @@ steps:
       docker buildx build --progress=rawjson
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
-      --cache-from us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
-      --cache-from us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
+      --cache-from type=registry,ref=us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
+      --cache-from type=registry,ref=us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
+      --cache-to type=inline
       .
 images:
   - us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
