@@ -1,7 +1,7 @@
 FROM nvcr.io/nvidia/pytorch:24.10-py3
 WORKDIR /workspace
 RUN rm -rf *
-COPY requirements.txt ./
+COPY requirements.txt cuda-requirements ./
 RUN python -m pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir jupyter_kernel_gateway
 RUN pip install --no-cache-dir -r requirements.txt
