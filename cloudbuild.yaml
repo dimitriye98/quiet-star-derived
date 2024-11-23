@@ -1,14 +1,11 @@
 steps:
   - name: gcr.io/cloud-builders/docker
     script: >
-      docker pull us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
-      && docker pull us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
-      || exit 0
-  - name: gcr.io/cloud-builders/docker
-    script: >
       docker build
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
       -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
+      --cache-from us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
+      --cache-from us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
       .
 images:
   - us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
