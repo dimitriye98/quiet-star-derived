@@ -3,8 +3,8 @@ WORKDIR /workspace
 RUN rm -rf *
 COPY requirements.txt ./
 RUN python -m pip install --upgrade pip
-RUN --mount=type=cache,target=/root/.cache/pip pip install jupyter_kernel_gateway
-RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+RUN pip install jupyter_kernel_gateway
+RUN pip install -r requirements.txt
 RUN pip install
 
 COPY src/* ./
