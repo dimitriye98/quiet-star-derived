@@ -1,18 +1,18 @@
 steps:
   - name: gcr.io/cloud-builders/docker
     script: >
-      docker pull us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
-      && docker pull us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
+      docker pull us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:main
+      && docker pull us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
       || exit 0
   - name: gcr.io/cloud-builders/docker
     script: >
       docker build
-      -t us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
-      -t us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
+      -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
+      -t us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
       .
 images:
-  - us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
-  - us-west1-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
+  - us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME
+  - us-west2-docker.pkg.dev/$PROJECT_ID/dimitriye98/quiet-star:$BRANCH_NAME-$SHORT_SHA
 options:
   logging: CLOUD_LOGGING_ONLY
   automapSubstitutions: true
