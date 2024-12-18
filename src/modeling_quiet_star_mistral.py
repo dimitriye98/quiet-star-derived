@@ -30,7 +30,7 @@ from matplotlib.colors import  LogNorm
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import CrossEntropyLoss, Parameter
 
 from transformers import Cache, DynamicCache
@@ -437,96 +437,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 		logits = self.lm_head(mixed_hidden_states)
 		return logits
 
-	@add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
-	@replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
-	def forward(
-		self,
-		input_ids: torch.LongTensor = None,
-		attention_mask: Optional[torch.Tensor] = None,
-		position_ids: Optional[torch.LongTensor] = None,
-		past_key_values: Optional[List[torch.FloatTensor]] = None,
-		inputs_embeds: Optional[torch.FloatTensor] = None,
-		labels: Optional[torch.LongTensor] = None,
-		use_cache: Optional[bool] = None,
-		output_attentions: Optional[bool] = None,
-		output_hidden_states: Optional[bool] = None,
-		return_dict: Optional[bool] = None,
-	) -> Union[Tuple, CausalLMOutputWithPast]:
-		r"""
-		Args:
-			labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
-				Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
-				config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
-				(masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
-
-		Returns:
-
-		Example:
-
-		```python
-		>>> from transformers import AutoTokenizer, MistralForCausalLM
-
-		>>> model = MistralForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
-		>>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
-
-		>>> prompt = "Hey, are you conscious? Can you talk to me?"
-		>>> inputs = tokenizer(prompt, return_tensors="pt")
-
-		>>> # Generate
-		>>> generate_ids = model.generate(inputs.input_ids, max_length=30)
-		>>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-		"Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
-		```"""
-		log_dict = self.log_dict if self.training else self.eval_log_dict
-
-		if self.training and self.kill_after is not None and self.training_steps // self.gradient_accumulation_steps > self.kill_after:
-			raise ValueError("Killed after")
-
-		if not self.training:
-			n_ahead_talk_to_restore = self.n_ahead_talk
-			n_passes_to_restore = self.n_passes
-			self.n_ahead_talk = 1
-			self.n_passes = 1
-
-		output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-		output_hidden_states = (
-			output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-		)
-		return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-		assert self.cumulative_residual or self.clever_residual or self.skip_residual or self.no_residual
-		assert not (self.skip_residual and self.use_policy_loss)
-
-		if self.tokenized_thought_prefix is None and self.use_thought_prefix:
-			self.tokenized_thought_prefix = self.tokenizer(self.thought_prefix, return_tensors="pt", add_special_tokens=False)["input_ids"]
-
-		def apply_head(head, states, detach=False):
-			if detach:
-				head_weight = head.weight.detach()
-			else:
-				head_weight = head.weight
-			head_weight = head_weight.to(states.device)
-			return (head_weight @ states.transpose(-1, -2)).transpose(-1, -2).contiguous()
-
-		def idx_if_sequential(head, idx=0):
-			if isinstance(head, nn.Sequential) or isinstance(head, nn.ModuleList):
-				return idx_if_sequential(head[idx], idx=idx)
-			return head
-
-		def none_repeat_interleave(x, n):
-			if x is None:
-				return x
-			return x.repeat_interleave(n, dim=0)
-
-		if self.n_passes > 1:
-			input_ids = none_repeat_interleave(input_ids, self.n_passes)
-			attention_mask = none_repeat_interleave(attention_mask, self.n_passes)
-			position_ids = none_repeat_interleave(position_ids, self.n_passes)
-			inputs_embeds = none_repeat_interleave(inputs_embeds, self.n_passes)
-			labels = none_repeat_interleave(labels, self.n_passes)
-			if past_key_values is not None:
-				past_key_values = [none_repeat_interleave(p, self.n_passes) for p in past_key_values]
-
+	def _initialize_thought_tokens(self):
 		def initialize_thought_token(
 				token_id_attr: str,
 				token_str: str,
@@ -588,6 +499,98 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			embedding=self.end_embedding,
 			fallback_token_id=self.tokenizer.eos_token_id
 		)
+
+		return tokenizer_has_start_thought_token, tokenizer_has_end_thought_token
+
+	@add_start_docstrings_to_model_forward(MISTRAL_INPUTS_DOCSTRING)
+	@replace_return_docstrings(output_type=CausalLMOutputWithPast, config_class=_CONFIG_FOR_DOC)
+	def forward(
+		self,
+		input_ids: torch.LongTensor = None,
+		attention_mask: Optional[torch.Tensor] = None,
+		position_ids: Optional[torch.LongTensor] = None,
+		past_key_values: Optional[List[torch.FloatTensor]] = None,
+		inputs_embeds: Optional[torch.FloatTensor] = None,
+		labels: Optional[torch.LongTensor] = None,
+		use_cache: Optional[bool] = None,
+		output_attentions: Optional[bool] = None,
+		output_hidden_states: Optional[bool] = None,
+		return_dict: Optional[bool] = None,
+	) -> Union[Tuple, CausalLMOutputWithPast]:
+		r"""/
+		Args:
+			labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
+				Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
+				config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
+				(masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
+
+		Returns:
+
+		Example:
+
+		```python
+		>>> from transformers import AutoTokenizer, MistralForCausalLM
+
+		>>> model = MistralForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1")
+		>>> tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+
+		>>> prompt = "Hey, are you conscious? Can you talk to me?"
+		>>> inputs = tokenizer(prompt, return_tensors="pt")
+
+		>>> # Generate
+		>>> generate_ids = model.generate(inputs.input_ids, max_length=30)
+		>>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+		"Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
+		```"""
+		log_dict = self.log_dict if self.training else self.eval_log_dict
+
+		if self.training and self.kill_after is not None and self.training_steps // self.gradient_accumulation_steps > self.kill_after:
+			raise ValueError("Killed after")
+
+		if not self.training:
+			n_ahead_talk_to_restore = self.n_ahead_talk
+			n_passes_to_restore = self.n_passes
+			self.n_ahead_talk = 1
+			self.n_passes = 1
+
+		output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+		output_hidden_states = (
+			output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+		)
+		return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+		assert self.cumulative_residual or self.clever_residual or self.skip_residual or self.no_residual
+		assert not (self.skip_residual and self.use_policy_loss)
+
+		if self.tokenized_thought_prefix is None and self.use_thought_prefix:
+			self.tokenized_thought_prefix = self.tokenizer(self.thought_prefix, return_tensors="pt", add_special_tokens=False)["input_ids"]
+
+		def apply_head(head, states, detach=False):
+			if detach:
+				head_weight = head.weight.detach()
+			else:
+				head_weight = head.weight
+			head_weight = head_weight.to(states.device)
+			return (head_weight @ states.transpose(-1, -2)).transpose(-1, -2).contiguous()
+
+		def idx_if_sequential(head, idx=0):
+			if isinstance(head, nn.Sequential) or isinstance(head, nn.ModuleList):
+				return idx_if_sequential(head[idx], idx=idx)
+			return head
+
+		if self.n_passes > 1:
+			def none_repeat_interleave(x: Tensor, n):
+				return None if x is None else x.repeat_interleave(n, dim=0)
+
+			input_ids = none_repeat_interleave(input_ids, self.n_passes)
+			attention_mask = none_repeat_interleave(attention_mask, self.n_passes)
+			position_ids = none_repeat_interleave(position_ids, self.n_passes)
+			inputs_embeds = none_repeat_interleave(inputs_embeds, self.n_passes)
+			labels = none_repeat_interleave(labels, self.n_passes)
+			if past_key_values is not None:
+				past_key_values = [none_repeat_interleave(p, self.n_passes) for p in past_key_values]
+
+		tokenizer_has_start_thought_token, tokenizer_has_end_thought_token = self._initialize_thought_tokens()
 
 		if not self.rm_initialized and (self.n_ahead > 1 or not self.base_original_mode):
 			self.rm_initialized = True
@@ -657,17 +660,17 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			base_embeddings = self.model.embed_tokens.weight
 			if self.train_only_thinking_embedding:
 				base_embeddings = base_embeddings.detach()
+
 		# # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 		fwd_iters = 1 if self.original_mode else self.n_ahead + self.n_ahead_talk - 1
 		for ahead_idx in range(fwd_iters):
 			past_key_values_length = 0
 			if past_key_values is not None:
-				use_legacy_cache = not isinstance(past_key_values, Cache)
-				if use_legacy_cache:
+				if not isinstance(past_key_values, Cache): # Use legacy cache
 					past_key_values = DynamicCache.from_legacy_cache(past_key_values)
 				past_key_values_length = past_key_values.get_usable_length(seq_len)
 
-			if position_ids is None:
+			if position_ids is None: # Initialize position_ids
 				device = input_ids.device if input_ids is not None else inputs_embeds.device
 				position_ids = torch.arange(
 					past_key_values_length, seq_len + past_key_values_length, dtype=torch.long, device=device
@@ -676,31 +679,39 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 			else:
 				position_ids = position_ids.view(-1, seq_len).long()
 
-			if inputs_embeds is None:
+			if inputs_embeds is None: # initialize input_embeds
 				contains_start = self.use_start_thought_token and (input_ids == self.start_token_id).any() and start_embedding is not None
 				contains_end = self.use_end_thought_token and (input_ids == self.end_token_id).any() and end_embedding is not None
-				contains_thought = contains_start or contains_end
-				if contains_thought:
+
+				if contains_start or contains_end:
 					cur_thought_embedding = start_embedding if contains_start else end_embedding
+
 					if self.use_reparam_for_thought_embeddings:
-						inputs_embeds = torch.randn(batch_size, seq_len, self.model.config.hidden_size, device=input_ids.device, dtype=cur_thought_embedding.dtype)
-						inputs_embeds = inputs_embeds.detach() * torch.exp(cur_thought_embedding[1]) + cur_thought_embedding[0]
-						if contains_start:
-							sampled_start = inputs_embeds.clone().detach()
-						if contains_end:
-							sampled_end = inputs_embeds.clone().detach()
+						inputs_embeds = (torch.randn(
+								batch_size,
+								seq_len,
+								self.model.config.hidden_size,
+								device=input_ids.device,
+								dtype=cur_thought_embedding.dtype)
+							.detach()
+							* torch.exp(cur_thought_embedding[1]) + cur_thought_embedding[0])
+
+						if contains_start: sampled_start = inputs_embeds.clone().detach()
+						if contains_end: sampled_end = inputs_embeds.clone().detach()
+
 					else:
 						inputs_embeds = cur_thought_embedding.unsqueeze(0).repeat(batch_size, seq_len, 1)
+
 				else:
 					with torch.set_grad_enabled(not self.train_only_thinking_embedding):
 						inputs_embeds = self.model.embed_tokens(input_ids)
 
 			if self.n_ahead != 1 or self.n_ahead_talk != 1 or self.comparison_mode:
 				if attention_mask is None:
-					base_attention_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=0).to(input_ids.device)
-					base_attention_mask = base_attention_mask.view(1, 1, seq_len, seq_len)
-					base_attention_mask = base_attention_mask.repeat(input_ids.shape[0], 1, 1, 1)
-					attention_mask = base_attention_mask
+					attention_mask = (torch.triu(torch.ones(seq_len, seq_len), diagonal=0)
+						.to(input_ids.device)
+						.view(1, 1, seq_len, seq_len)
+						.repeat(input_ids.shape[0], 1, 1, 1))
 					# breakpoint()
 				elif attention_mask.dim() == 2:
 					if seq_len + past_key_values_length != attention_mask.shape[-1]:
@@ -898,6 +909,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 						skip_sampling = True
 					else:
 						continue
+
 				temperature = self.gumbel_temperature if self.training else 0.001
 				prev_sample_probs = sample_probs
 				sample_probs = probabilities_2d
@@ -906,6 +918,7 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 					if self.gumbel_detach:
 						probabilities_2d = probabilities_2d.detach()
 				sampled_token_history.append(probabilities_2d.argmax(dim=-1).detach().cpu())
+
 				# convert rm logits directly to embeddings
 				contains_start = self.use_start_thought_token and (probabilities_2d[..., self.start_token_id].sum() > 0)
 				contains_end = self.use_end_thought_token and (probabilities_2d[..., self.end_token_id].sum() > 0)
@@ -948,8 +961,11 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 								seq_len, dtype=torch.float32, device=attention_mask.device
 							).to(attention_mask.dtype)
 
-						new_attention = new_attention.view(1, 1, seq_len, seq_len).repeat(input_ids.shape[0], 1, 1, 1)
-						new_attention = new_attention * original_attention
+						new_attention = (new_attention
+							.view(1, 1, seq_len, seq_len)
+							.repeat(input_ids.shape[0], 1, 1, 1)
+							* original_attention)
+
 						new_attention[new_attention == 0] = attention_mask.min()
 						new_attention[new_attention == 1] = attention_mask.max()
 					attention_mask = torch.cat([attention_mask, new_attention], dim=-1)
@@ -1044,7 +1060,6 @@ class QuietMistralForCausalLM(MistralPreTrainedModel):
 							# with mean start_embedding[0] and standard deviation start_embedding[1]
 							if self.use_start_thought_token:
 								exp_start_std = torch.exp(start_embedding[1])
-								# FIXME: Spooky action at a distance
 								# pylint: disable=used-before-assignment
 								start_loglikelihood = -0.5 * (sampled_start.detach() - start_embedding[0]) ** 2 / exp_start_std ** 2 - start_embedding[1] - 0.5 * math.log(2 * math.pi)
 								start_loglikelihood = start_loglikelihood.mean(dim=-1)
